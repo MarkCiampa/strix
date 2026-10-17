@@ -21,24 +21,28 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from strix.config import codex, load_settings
+from strix.config import antigravity, codex, load_settings
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-
 logger = logging.getLogger(__name__)
 
 _CALLBACK_TIMEOUT_S = 300
 
-# CLI-facing name for the login provider. Internally this is the Codex OAuth
-# flow (``codex.PROVIDER``), but users know it as ChatGPT, so that's what the
-# command and messaging say. ``codex`` is accepted as an alias.
 LOGIN_PROVIDER = "chatgpt"
-_ACCEPTED_PROVIDERS = frozenset({LOGIN_PROVIDER, codex.PROVIDER})
+ANTIGRAVITY_PROVIDER = "antigravity"
+_ACCEPTED_PROVIDERS = frozenset(
+    {LOGIN_PROVIDER, codex.PROVIDER, ANTIGRAVITY_PROVIDER, "agy", "google"}
+)
 
-_USAGE = "Usage:\n  strix auth login chatgpt [--manual]\n  strix auth status\n  strix auth logout"
+_USAGE = (
+    "Usage:\n"
+    "  strix auth login [chatgpt|antigravity] [--manual]\n"
+    "  strix auth status\n"
+    "  strix auth logout"
+)
 
 
 def run_auth(argv: list[str]) -> int:
@@ -84,12 +88,16 @@ def _login(console: Console, argv: list[str]) -> int:
     except SystemExit as exc:  # argparse already printed the message
         return int(exc.code or 2)
 
-    if args.provider.lower() not in _ACCEPTED_PROVIDERS:
+    provider_key = args.provider.lower()
+    if provider_key not in _ACCEPTED_PROVIDERS:
         console.print(
             f"[red]Unsupported provider:[/] {args.provider}. "
-            f"Only '{LOGIN_PROVIDER}' (ChatGPT subscription) is supported."
+            f"Supported providers: '{LOGIN_PROVIDER}', '{ANTIGRAVITY_PROVIDER}'."
         )
         return 2
+
+    if provider_key in (ANTIGRAVITY_PROVIDER, "agy", "google"):
+        return _login_antigravity(console)
 
     verifier, challenge = codex.generate_pkce()
     state = codex.create_state()
@@ -242,26 +250,69 @@ def _first(query: dict[str, list[str]], key: str) -> str | None:
     return values[0] if values else None
 
 
+def _login_antigravity(console: Console) -> int:
+    console.print()
+    console.print("[bold]Signing in with Antigravity[/] [dim](provider: antigravity)[/]")
+    console.print(
+        "[dim]Uses your Antigravity CLI session (Gemini & Claude models) without API keys.[/]"
+    )
+    console.print()
+    record = antigravity.read_record()
+    if record and record.get("refresh"):
+        try:
+            antigravity.get_valid_token()
+        except Exception as exc:  # noqa: BLE001
+            console.print(f"[red]Error refreshing Antigravity token:[/] {exc}")
+            return 1
+        else:
+            console.print("[green]Successfully linked active Antigravity session![/]")
+            console.print("  Token refreshed and valid.")
+            console.print()
+            console.print("Run scans with:")
+            console.print('  [cyan]export STRIX_LLM="antigravity/gemini-3-flash"[/]')
+            console.print('  [cyan]export STRIX_LLM="antigravity/gemini-2.5-pro"[/]')
+            console.print('  [cyan]export STRIX_LLM="antigravity/claude-sonnet-4-6"[/]')
+            return 0
+    console.print(
+        "[yellow]No Antigravity CLI session found in ~/.gemini/.[/]\n"
+        "Please run 'agy' or log in to Antigravity CLI first."
+    )
+    return 1
+
+
 def _status(console: Console) -> int:
-    record = codex.read_record()
-    if record is None:
-        console.print("[yellow]Not signed in.[/] Run [cyan]strix auth login chatgpt[/] to sign in.")
+    codex_record = codex.read_record()
+    agy_record = antigravity.read_record()
+    if codex_record is None and agy_record is None:
+        console.print(
+            "[yellow]Not signed in.[/] Run [cyan]strix auth login chatgpt[/] or "
+            "[cyan]strix auth login antigravity[/] to sign in."
+        )
         return 1
+
     settings = load_settings()
-    console.print("[green]Signed in[/] with a ChatGPT subscription.")
-    console.print(f"  Account: [bold]{record.get('account_id')}[/]")
-    if codex.subscription_model(settings.llm.model):
-        console.print(f"  Runs use the subscription (STRIX_LLM=[bold]{settings.llm.model}[/]).")
+    if codex_record:
+        console.print("[green]Signed in[/] with a ChatGPT subscription.")
+        console.print(f"  Account: [bold]{codex_record.get('account_id')}[/]")
+    if agy_record:
+        console.print("[green]Signed in[/] with an Antigravity subscription.")
+        console.print("  Session: [bold]~/.gemini/ (Active)[/]")
+        console.print("  Models: [bold]gemini-3-flash, gemini-2.5-pro, claude-sonnet-4-6[/]")
+
+    current_model = settings.llm.model or ""
+    if codex.subscription_model(current_model) or antigravity.subscription_model(current_model):
+        console.print(f"  Runs use the subscription (STRIX_LLM=[bold]{current_model}[/]).")
     else:
         console.print(
-            "  [yellow]Note:[/] set [cyan]STRIX_LLM[/] to e.g. [cyan]chatgpt/gpt-5.4[/] "
-            "to run on the subscription."
+            "  [yellow]Note:[/] set [cyan]STRIX_LLM[/] to e.g. [cyan]antigravity/gemini-3-flash[/] "
+            "or [cyan]antigravity/claude-sonnet-4-6[/] to run on subscription."
         )
     return 0
 
 
 def _logout(console: Console) -> int:
     codex.logout()
+    antigravity.logout()
     console.print("[green]Signed out.[/] Stored subscription credentials removed.")
     return 0
 

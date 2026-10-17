@@ -362,8 +362,16 @@ async def maybe_compact(
     window = context_window(model)
     reserve = max(context.compact_buffer_tokens, output_limit(model))
     budget = max(context.keep_tokens, window - reserve)
-    used = count_tokens(model, "\n".join((instructions, tools_text, _serialize_items(items))))
-    if not force and used <= budget:
+    serialized_history = _serialize_items(items)
+    used = count_tokens(model, f"{instructions}\n{tools_text}\n{serialized_history}")
+    history_tokens = count_tokens(model, serialized_history)
+
+    should_compact = (
+        force
+        or used > budget
+        or (context.max_history_tokens > 0 and history_tokens > context.max_history_tokens)
+    )
+    if not should_compact:
         return False
 
     split = _select_split(model, items, context.keep_tokens)

@@ -22,6 +22,8 @@ _STRIPPABLE_PREFIXES = (
     "any-llm/",
     "ollama/",
     "ollama_chat/",
+    "antigravity/",
+    "agy/",
 )
 
 _DEFAULT_OUTPUT_TOKENS = 8_192

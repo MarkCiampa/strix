@@ -60,7 +60,7 @@ class LlmSettings(BaseSettings):
         alias="LLM_EXTRA_BODY",
         repr=False,
     )
-    reasoning_effort: ReasoningEffort = Field(default="high", alias="STRIX_REASONING_EFFORT")
+    reasoning_effort: ReasoningEffort = Field(default="medium", alias="STRIX_REASONING_EFFORT")
     force_required_tool_choice: bool = Field(
         default=False,
         alias="STRIX_FORCE_REQUIRED_TOOL_CHOICE",
@@ -139,8 +139,9 @@ class ContextSettings(BaseSettings):
         default=200_000, gt=0, alias="STRIX_CONTEXT_FALLBACK_TOKENS"
     )
     summary_max_tokens: int = Field(default=4_096, gt=0, alias="STRIX_CONTEXT_SUMMARY_TOKENS")
-    tool_output_max_tokens: int = Field(default=8_000, gt=0, alias="STRIX_TOOL_OUTPUT_MAX_TOKENS")
-    tool_output_max_lines: int = Field(default=2_000, gt=0, alias="STRIX_TOOL_OUTPUT_MAX_LINES")
+    max_history_tokens: int = Field(default=40_000, ge=0, alias="STRIX_MAX_HISTORY_TOKENS")
+    tool_output_max_tokens: int = Field(default=2_500, gt=0, alias="STRIX_TOOL_OUTPUT_MAX_TOKENS")
+    tool_output_max_lines: int = Field(default=1_000, gt=0, alias="STRIX_TOOL_OUTPUT_MAX_LINES")
     # Floor above the truncation-notice size so a preview always fits.
     tool_output_max_bytes: int = Field(
         default=50 * 1024, ge=1024, alias="STRIX_TOOL_OUTPUT_MAX_BYTES"

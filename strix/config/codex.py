@@ -403,4 +403,10 @@ def subscription_model(model_name: str | None) -> str | None:
 
 
 def auth_mode(model_name: str | None) -> str:
-    return "subscription" if subscription_model(model_name) else "api_key"
+    if subscription_model(model_name):
+        return "subscription"
+    from strix.config import antigravity
+
+    if antigravity.subscription_model(model_name):
+        return "subscription"
+    return "api_key"

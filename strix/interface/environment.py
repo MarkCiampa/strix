@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from strix.config import IntegrationSettings, codex, load_settings
+from strix.config import IntegrationSettings, antigravity, codex, load_settings
 from strix.interface.utils import (
     check_docker_connection,
     image_exists,
@@ -48,6 +48,18 @@ def validate_environment() -> None:
             report_error("subscription_not_signed_in")
             sys.exit(1)
         logger.info("Environment OK (ChatGPT subscription)")
+        return
+
+    if antigravity.subscription_model(settings.llm.model):
+        if not antigravity.is_authenticated():
+            console.print(
+                f"[red]STRIX_LLM={settings.llm.model} uses your Antigravity subscription, "
+                "but you're not signed in.[/] "
+                "Run [cyan]strix auth login antigravity[/] or log into Antigravity first."
+            )
+            report_error("subscription_not_signed_in")
+            sys.exit(1)
+        logger.info("Environment OK (Antigravity subscription)")
         return
 
     if not settings.llm.model:

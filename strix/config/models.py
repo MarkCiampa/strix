@@ -22,6 +22,7 @@ from agents.model_settings import ModelSettings
 from agents.models.fake_id import FAKE_RESPONSES_ID
 from agents.models.interface import Model, ModelProvider
 from agents.models.multi_provider import MultiProvider
+from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 from agents.models.openai_responses import OpenAIResponsesModel
 from agents.retry import (
     ModelRetryBackoffSettings,
@@ -39,7 +40,7 @@ from openai.types.responses.response_usage import ResponseUsage
 from openai.types.shared import Reasoning
 
 from strix.agents.prompt import CACHE_POINT
-from strix.config import codex
+from strix.config import antigravity, codex
 from strix.config.loader import load_settings
 from strix.config.tool_call_arguments import repair_input
 from strix.config.tool_call_ids import TurnCallIdRewriter, dedupe_input
@@ -631,6 +632,16 @@ class StrixProvider(MultiProvider):
                 provider="openai-codex",
                 base_url=None,
             )
+        elif agy_slug := antigravity.subscription_model(model_name):
+            model = request_log.RequestLoggingModel(
+                OpenAIChatCompletionsModel(
+                    agy_slug,
+                    antigravity.get_subscription_client(),
+                ),
+                model_name=agy_slug,
+                provider="antigravity",
+                base_url=None,
+            )
         else:
             model = super().get_model(model_name)
             resolved_name = model_name or llm.model or "unknown"
@@ -706,7 +717,7 @@ def configure_sdk_model_defaults(settings: Settings) -> None:
     llm = settings.llm
     set_tracing_disabled(True)
     request_log.install()
-    if codex.subscription_model(llm.model):
+    if codex.subscription_model(llm.model) or antigravity.subscription_model(llm.model):
         return
     _configure_litellm_compatibility()
     _configure_openrouter_attribution(llm.model)
@@ -973,6 +984,8 @@ def uses_chat_completions_tool_schema(model_name: str, settings: Settings) -> bo
     """Return whether the resolved SDK route can only receive JSON function tools."""
     if codex.subscription_model(model_name):
         return False
+    if antigravity.subscription_model(model_name):
+        return True
     model = model_name.strip().lower()
     if "/" in model and not model.startswith("openai/"):
         return True
@@ -1048,7 +1061,7 @@ def routes_through_litellm(model_name: str | None) -> bool:
     OpenAI-compatible gateway in front of Claude.
     """
     name = (model_name or "").strip()
-    if not name or codex.subscription_model(name):
+    if not name or codex.subscription_model(name) or antigravity.subscription_model(name):
         return False
     prefix, _, rest = name.partition("/")
     return bool(rest) and prefix.lower() not in {"openai", "any-llm"}

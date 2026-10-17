@@ -18,7 +18,7 @@ from openai import RateLimitError
 
 from strix.agents.factory import build_strix_agent, make_child_factory
 from strix.agents.prompt import render_scope_prompt, render_system_prompt
-from strix.config import codex, load_settings
+from strix.config import antigravity, codex, load_settings
 from strix.config.models import (
     StrixProvider,
     configure_sdk_api_route,
@@ -278,8 +278,10 @@ async def run_strix_scan(
         raise RuntimeError(
             "No LLM model configured. Set STRIX_LLM env or pass model= to run_strix_scan().",
         )
-    if resolved_model != (settings.llm.model or "").strip() and not codex.subscription_model(
-        resolved_model
+    if (
+        resolved_model != (settings.llm.model or "").strip()
+        and not codex.subscription_model(resolved_model)
+        and not antigravity.subscription_model(resolved_model)
     ):
         configure_sdk_api_route(resolved_model, settings)
     logger.info("LLM model resolved: %s", resolved_model)

@@ -51,3 +51,18 @@ def _isolate_wallet_config(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     for name in ("MPPX_ACCOUNT", "MPPX_STRIPE_SECRET_KEY", "MPPX_STRIPE_PAYMENT_METHOD"):
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_subscription_auth(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """Keep a developer's real subscription credentials out of the test suite."""
+    temp_dir = tmp_path_factory.mktemp("subscription-auth")
+    fake_auth = temp_dir / "subscription-auth.json"
+    fake_standalone = temp_dir / "jetski-standalone-oauth-token"
+    from strix.config import antigravity, codex  # noqa: PLC0415
+
+    monkeypatch.setattr(codex, "AUTH_PATH", fake_auth)
+    monkeypatch.setattr(antigravity, "AUTH_PATH", fake_auth)
+    monkeypatch.setattr(antigravity, "STANDALONE_TOKEN_PATH", fake_standalone)

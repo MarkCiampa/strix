@@ -338,3 +338,38 @@ async def test_maybe_compact_skips_when_no_room_to_summarise(
     assert await compaction.maybe_compact(session, model="m", force=True) is False
     assert not captured
     assert await session.get_items() == before
+
+
+@pytest.mark.asyncio
+async def test_maybe_compact_triggers_on_max_history_tokens_within_large_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Model context window is massive (1M tokens), but history exceeds max_history_tokens.
+    _patch_budget(monkeypatch, keep_tokens=50, window=1_000_000)
+    _patch_summary(monkeypatch, "SUMMARY OF OLD TURNS")
+    settings = compaction.load_settings()
+    settings.context.max_history_tokens = 200  # tighter than the ~600 char turns
+
+    session = FakeSession(_turns(10))
+    assert await compaction.maybe_compact(session, model="m") is True
+
+    items = await session.get_items()
+    assert items[0]["role"] == "user"
+    assert "SUMMARY OF OLD TURNS" in items[0]["content"]
+    assert len(items) < len(_turns(10))
+
+
+@pytest.mark.asyncio
+async def test_maybe_compact_ignores_max_history_tokens_when_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Setting max_history_tokens to 0 disables proactive history compaction.
+    _patch_budget(monkeypatch, keep_tokens=50, window=1_000_000)
+    settings = compaction.load_settings()
+    settings.context.max_history_tokens = 0
+
+    session = FakeSession(_turns(10))
+    before = await session.get_items()
+
+    assert await compaction.maybe_compact(session, model="m") is False
+    assert await session.get_items() == before
