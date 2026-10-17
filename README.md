@@ -307,15 +307,53 @@ export LLM_API_BASE="your-api-base-url"  # if using a local model, e.g. Ollama, 
 > Strix automatically saves your configuration to `~/.strix/cli-config.json`, so you don't have to re-enter it on every run.
 > See the [configuration reference](https://docs.strix.ai/advanced/configuration) for every environment variable.
 
-#### Sign in with a ChatGPT subscription
+#### Subscriptions (No API Key Required)
 
-Instead of a metered API key, you can run Strix on your ChatGPT Plus/Pro subscription:
+Instead of a metered API key, you can run Strix directly using your active subscription:
+
+##### 1. Antigravity CLI / Claude & Gemini Subscription
+
+If you have an **Antigravity CLI** session or Google account with Antigravity access, you can run scans with both **Anthropic Claude** and **Google Gemini** models without an API key:
+
+- **Automatic session discovery**: If you already logged in with `antigravity-cli`, Strix automatically detects and uses your active session (`~/.gemini/`) — no setup needed!
+- **Interactive login**: Or sign in directly from Strix:
+  ```bash
+  strix auth login antigravity
+  ```
+- **Supported Models**:
+  - **Anthropic Claude**: `antigravity/claude-sonnet-4-6` (alias: `agy/claude-sonnet-4-6`)
+  - **Google Gemini**: `antigravity/gemini-3-flash`, `antigravity/gemini-2.5-pro` (alias: `agy/gemini-3-flash`)
+- **Run scans**:
+  ```bash
+  # Run with Claude Sonnet
+  export STRIX_LLM="antigravity/claude-sonnet-4-6"
+  strix --target ./app-directory --scan-mode quick
+
+  # Run with Gemini 3 Flash
+  export STRIX_LLM="antigravity/gemini-3-flash"
+  strix --target ./app-directory --scan-mode quick
+  ```
+- **Status and management**:
+  ```bash
+  strix auth status              # view active subscription sessions
+  strix auth logout antigravity  # sign out
+  ```
+
+##### 2. ChatGPT Plus/Pro Subscription
+
+Run Strix on your ChatGPT Plus/Pro subscription:
 
 ```bash
 strix auth login chatgpt             # sign in with your ChatGPT account
 export STRIX_LLM="chatgpt/gpt-5.4"   # chatgpt/<model> runs on the subscription
 strix auth status                    # show the active sign-in, or logout to forget it
 ```
+
+> [!TIP]
+> **Token & Cost Optimizations:**
+> - Proactive history compaction is active by default (`STRIX_MAX_HISTORY_TOKENS=40000`) to prevent context window bloat during long scans.
+> - Adjust reasoning effort with `STRIX_REASONING_EFFORT="medium"` (default) or `"low"` to minimize thinking token overhead.
+> - Use `--scan-mode quick` for focused, cost-effective scans.
 
 #### Use the managed platform: `strix cloud`
 
