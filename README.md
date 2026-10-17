@@ -309,14 +309,33 @@ export LLM_API_BASE="your-api-base-url"  # if using a local model, e.g. Ollama, 
 
 #### Subscriptions (No API Key Required)
 
-Instead of a metered API key, you can run Strix directly using your active subscription:
+Instead of a metered API key, you can run Strix directly using your active subscription. All subscription mechanisms work seamlessly cross-platform on **macOS**, **Linux**, and **Windows**:
 
-##### 1. Antigravity CLI / Claude & Gemini Subscription
+##### 1. Claude Pro / Team / Enterprise / Claude Code Subscription
+
+If you have a Claude subscription (Pro, Team, Enterprise) or an active Claude Code session, you can run scans without an Anthropic API key:
+
+- **Automatic session discovery**: On macOS (Keychain), Linux (`secret-tool` / `~/.claude/`), and Windows (Credential Manager / `%APPDATA%\Claude\`), Strix automatically detects and links your active Claude Code session!
+- **Interactive login**: Or sign in directly via OAuth in your browser:
+  ```bash
+  strix auth login claude
+  ```
+- **Supported Models**:
+  - `claude/claude-sonnet-4-6` (aliases: `claude/sonnet`, `claude/claude-3-7-sonnet`, `claude/claude-3-5-sonnet`)
+  - `claude/claude-opus-5-5` (aliases: `claude/opus`)
+  - `claude/claude-haiku-4-5` (aliases: `claude/haiku`)
+- **Run scans**:
+  ```bash
+  export STRIX_LLM="claude/claude-sonnet-4-6"
+  strix --target ./app-directory --scan-mode quick
+  ```
+
+##### 2. Antigravity CLI / Claude & Gemini Subscription
 
 If you have an **Antigravity CLI** session or Google account with Antigravity access, you can run scans with both **Anthropic Claude** and **Google Gemini** models without an API key:
 
-- **Automatic session discovery**: If you already logged in with `antigravity-cli`, Strix automatically detects and uses your active session (`~/.gemini/`) — no setup needed!
-- **Interactive login**: Or sign in directly from Strix:
+- **Automatic session discovery**: Strix automatically detects your active session (`~/.gemini/` on macOS/Linux, `%APPDATA%\gemini\` on Windows) or `ANTIGRAVITY_TOKEN` environment variable.
+- **Interactive login**: Or sign in directly:
   ```bash
   strix auth login antigravity
   ```
@@ -333,13 +352,8 @@ If you have an **Antigravity CLI** session or Google account with Antigravity ac
   export STRIX_LLM="antigravity/gemini-3-flash"
   strix --target ./app-directory --scan-mode quick
   ```
-- **Status and management**:
-  ```bash
-  strix auth status              # view active subscription sessions
-  strix auth logout antigravity  # sign out
-  ```
 
-##### 2. ChatGPT Plus/Pro Subscription
+##### 3. ChatGPT Plus/Pro Subscription
 
 Run Strix on your ChatGPT Plus/Pro subscription:
 
@@ -348,6 +362,12 @@ strix auth login chatgpt             # sign in with your ChatGPT account
 export STRIX_LLM="chatgpt/gpt-5.4"   # chatgpt/<model> runs on the subscription
 strix auth status                    # show the active sign-in, or logout to forget it
 ```
+
+- **Status and management**:
+  ```bash
+  strix auth status              # view active subscription sessions
+  strix auth logout              # sign out from all subscriptions
+  ```
 
 > [!TIP]
 > **Token & Cost Optimizations:**

@@ -14,6 +14,7 @@ import contextlib
 import json
 import logging
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -189,27 +190,73 @@ def _write_store(data: dict[str, Any]) -> None:
     write_secret_text(AUTH_PATH, json.dumps(data, indent=2))
 
 
+def _candidate_token_paths() -> list[Path]:
+    paths = [
+        STANDALONE_TOKEN_PATH,
+        Path.home() / ".gemini" / "antigravity-token.json",
+        Path.home() / ".config" / "antigravity" / "token.json",
+        Path.home() / ".antigravity" / "token.json",
+    ]
+    if sys.platform == "darwin":
+        paths.append(Path.home() / "Library" / "Application Support" / "antigravity" / "token.json")
+    elif sys.platform == "win32":
+        for var in ("APPDATA", "LOCALAPPDATA"):
+            base = os.environ.get(var)
+            if base:
+                paths.append(Path(base) / "gemini" / "jetski-standalone-oauth-token")
+                paths.append(Path(base) / "antigravity" / "token.json")
+    return paths
+
+
+def _extract_antigravity_token(data: Any) -> dict[str, Any] | None:
+    if not isinstance(data, dict):
+        return None
+    token_obj = data.get("token") if isinstance(data.get("token"), dict) else data
+    if not isinstance(token_obj, dict):
+        return None
+    refresh = token_obj.get("refresh_token") or token_obj.get("refreshToken")
+    access = token_obj.get("access_token") or token_obj.get("accessToken")
+    if refresh:
+        return {
+            "type": "oauth",
+            "provider": PROVIDER,
+            "access": str(access or ""),
+            "refresh": str(refresh),
+            "expires_at": 0.0,
+        }
+    return None
+
+
 def read_record() -> dict[str, Any] | None:
     record = _read_store().get(PROVIDER)
     if isinstance(record, dict) and record.get("type") == "oauth" and record.get("refresh"):
         return record
 
-    if STANDALONE_TOKEN_PATH.exists():
-        try:
-            raw = json.loads(STANDALONE_TOKEN_PATH.read_text(encoding="utf-8"))
-            token_obj = raw.get("token") or {}
-            refresh = token_obj.get("refresh_token")
-            access = token_obj.get("access_token")
-            if refresh:
-                return {
-                    "type": "oauth",
-                    "provider": PROVIDER,
-                    "access": access or "",
-                    "refresh": refresh,
-                    "expires_at": 0,
-                }
-        except (OSError, json.JSONDecodeError):
-            pass
+    for var in ("ANTIGRAVITY_TOKEN", "GEMINI_OAUTH_TOKEN", "ANTIGRAVITY_REFRESH_TOKEN"):
+        val = os.environ.get(var, "").strip()
+        if not val:
+            continue
+        if val.startswith("{") and val.endswith("}"):
+            with contextlib.suppress(json.JSONDecodeError):
+                extracted = _extract_antigravity_token(json.loads(val))
+                if extracted:
+                    return extracted
+        return {
+            "type": "oauth",
+            "provider": PROVIDER,
+            "access": val if not val.startswith("1//") else "",
+            "refresh": val,
+            "expires_at": 0.0,
+        }
+
+    for path in _candidate_token_paths():
+        if path.is_file():
+            with contextlib.suppress(OSError, json.JSONDecodeError):
+                data = json.loads(path.read_text(encoding="utf-8"))
+                extracted = _extract_antigravity_token(data)
+                if extracted:
+                    return extracted
+
     return None
 
 
@@ -237,23 +284,40 @@ def logout() -> None:
 @contextlib.contextmanager
 def _refresh_guard() -> Iterator[None]:
     with _refresh_lock:
+        lock_path = AUTH_PATH.with_suffix(".antigravity.lock")
+        handle = None
         try:
-            import fcntl  # noqa: PLC0415
-
-            lock_path = AUTH_PATH.with_suffix(".antigravity.lock")
             lock_path.parent.mkdir(parents=True, exist_ok=True)
-            handle = lock_path.open("w")
-        except (ImportError, OSError):
-            yield
-            return
-        try:
-            with contextlib.suppress(OSError):
+            handle = lock_path.open("a+")
+            if sys.platform == "win32":
+                import msvcrt  # noqa: PLC0415
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl  # noqa: PLC0415
+
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        except (ImportError, OSError):
+            pass
+
+        try:
             yield
         finally:
-            with contextlib.suppress(OSError):
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-            handle.close()
+            if handle is not None:
+                try:
+                    if sys.platform == "win32":
+                        import msvcrt  # noqa: PLC0415
+
+                        handle.seek(0)
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                    else:
+                        import fcntl  # noqa: PLC0415
+
+                        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                except (ImportError, OSError):
+                    pass
+                with contextlib.suppress(OSError):
+                    handle.close()
 
 
 def refresh_tokens(refresh_token: str) -> dict[str, Any]:

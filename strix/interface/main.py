@@ -15,7 +15,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from strix.config import codex, load_settings, persist_current
+from strix.config import antigravity, claude, codex, load_settings, persist_current
 from strix.core.paths import RUNS_DIR_NAME, run_dir_for
 from strix.interface.cli_args import (
     FAIL_ON_SEVERITIES,
@@ -86,25 +86,40 @@ def _exception_messages(exc: BaseException) -> tuple[str, ...]:
 
 
 def _subscription_error_hint(exc: BaseException) -> str | None:
-    """Return an actionable hint for a known ChatGPT-subscription error, or None."""
-    if not codex.subscription_model(load_settings().llm.model):
-        return None
+    """Return an actionable hint for a known subscription error, or None."""
+    model = load_settings().llm.model
     joined = " ".join(_exception_messages(exc)).lower()
-    if "not supported when using codex with a chatgpt account" in joined:
-        return (
-            "This model isn't available on your ChatGPT subscription. "
-            "Set STRIX_LLM to a model your plan includes (e.g. chatgpt/gpt-5.4)."
-        )
-    if (
+    is_auth_error = (
         "error code: 401" in joined
         or "http 401" in joined
         or "unauthorized" in joined
         or "invalid_grant" in joined
-    ):
+    )
+
+    if codex.subscription_model(model):
+        if "not supported when using codex with a chatgpt account" in joined:
+            return (
+                "This model isn't available on your ChatGPT subscription. "
+                "Set STRIX_LLM to a model your plan includes (e.g. chatgpt/gpt-5.4)."
+            )
+        if is_auth_error:
+            return (
+                "Your ChatGPT sign-in has expired or was revoked. Sign in again:\n"
+                "  strix auth login chatgpt"
+            )
+
+    if claude.subscription_model(model) and is_auth_error:
         return (
-            "Your ChatGPT sign-in has expired or was revoked. Sign in again:\n"
-            "  strix auth login chatgpt"
+            "Your Claude sign-in has expired or was revoked. Sign in again:\n"
+            "  strix auth login claude"
         )
+
+    if antigravity.subscription_model(model) and is_auth_error:
+        return (
+            "Your Antigravity sign-in has expired or was revoked. Sign in again:\n"
+            "  strix auth login antigravity"
+        )
+
     return None
 
 

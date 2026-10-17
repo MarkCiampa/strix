@@ -33,6 +33,7 @@ def test_scan_ended_reports_resumed_usage_delta(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("STRIX_LLM", "openrouter/test-model")
     initial = ReportState(run_name="resumed")
     initial.record_sdk_usage(
         agent_id="agent",
@@ -70,6 +71,7 @@ def test_scan_ended_reports_all_fresh_run_usage(
     telemetry: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("STRIX_LLM", "openrouter/test-model")
     state = ReportState()
     state.record_sdk_usage(
         agent_id="agent",

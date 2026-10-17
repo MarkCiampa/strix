@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
+import json
 import logging
 import threading
 import webbrowser
@@ -21,7 +23,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from strix.config import antigravity, codex, load_settings
+from strix.config import antigravity, claude, codex, load_settings
 
 
 if TYPE_CHECKING:
@@ -33,13 +35,23 @@ _CALLBACK_TIMEOUT_S = 300
 
 LOGIN_PROVIDER = "chatgpt"
 ANTIGRAVITY_PROVIDER = "antigravity"
+CLAUDE_PROVIDER = "claude"
 _ACCEPTED_PROVIDERS = frozenset(
-    {LOGIN_PROVIDER, codex.PROVIDER, ANTIGRAVITY_PROVIDER, "agy", "google"}
+    {
+        LOGIN_PROVIDER,
+        codex.PROVIDER,
+        ANTIGRAVITY_PROVIDER,
+        "agy",
+        "google",
+        CLAUDE_PROVIDER,
+        "claude-code",
+        "anthropic",
+    }
 )
 
 _USAGE = (
     "Usage:\n"
-    "  strix auth login [chatgpt|antigravity] [--manual]\n"
+    "  strix auth login [chatgpt|antigravity|claude] [--manual]\n"
     "  strix auth status\n"
     "  strix auth logout"
 )
@@ -99,6 +111,13 @@ def _login(console: Console, argv: list[str]) -> int:
     if provider_key in (ANTIGRAVITY_PROVIDER, "agy", "google"):
         return _login_antigravity(console)
 
+    if provider_key in (CLAUDE_PROVIDER, "claude-code", "anthropic"):
+        return _login_claude(console, manual=args.manual)
+
+    return _login_chatgpt(console, manual=args.manual)
+
+
+def _login_chatgpt(console: Console, manual: bool) -> int:
     verifier, challenge = codex.generate_pkce()
     state = codex.create_state()
     authorize_url = codex.build_authorize_url(challenge, state)
@@ -111,7 +130,7 @@ def _login(console: Console, argv: list[str]) -> int:
     console.print()
 
     try:
-        record = _run_oauth_flow(console, authorize_url, verifier, state, manual=args.manual)
+        record = _run_oauth_flow(console, authorize_url, verifier, state, manual=manual)
     except codex.CodexAuthError as exc:
         return _fail(console, exc)
     except KeyboardInterrupt:
@@ -273,20 +292,133 @@ def _login_antigravity(console: Console) -> int:
             console.print('  [cyan]export STRIX_LLM="antigravity/gemini-2.5-pro"[/]')
             console.print('  [cyan]export STRIX_LLM="antigravity/claude-sonnet-4-6"[/]')
             return 0
+    console.print("[yellow]No active Antigravity session found automatically.[/]")
+    console.print("To sign in:")
+    console.print("  1. Run [cyan]agy[/] in your terminal to log in to Antigravity CLI, OR")
+    console.print("  2. Paste your Antigravity refresh token or token JSON below.")
+    console.print()
+    try:
+        pasted = console.input("Paste token or JSON (or press Enter to cancel): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        console.print("\n[yellow]Sign-in cancelled.[/]")
+        return 130
+    if not pasted:
+        return 1
+
+    token_rec: dict[str, Any] | None = None
+    if pasted.startswith("{") and pasted.endswith("}"):
+        with contextlib.suppress(json.JSONDecodeError):
+            token_rec = antigravity._extract_antigravity_token(json.loads(pasted))
+    if token_rec is None:
+        token_rec = {
+            "type": "oauth",
+            "provider": antigravity.PROVIDER,
+            "access": pasted if not pasted.startswith("1//") else "",
+            "refresh": pasted,
+            "expires_at": 0.0,
+        }
+
+    try:
+        refreshed = antigravity.refresh_tokens(token_rec["refresh"])
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Failed to validate Antigravity token:[/] {exc}")
+        return 1
+
+    antigravity.save_record(refreshed)
+    console.print("[green]Successfully signed in with Antigravity![/]")
+    console.print("  Token refreshed and valid.")
+    console.print()
+    console.print("Run scans with:")
+    console.print('  [cyan]export STRIX_LLM="antigravity/gemini-3-flash"[/]')
+    console.print('  [cyan]export STRIX_LLM="antigravity/gemini-2.5-pro"[/]')
+    console.print('  [cyan]export STRIX_LLM="antigravity/claude-sonnet-4-6"[/]')
+    return 0
+
+
+def _login_claude(console: Console, manual: bool = False) -> int:
+    console.print()
+    console.print("[bold]Signing in with Claude[/] [dim](provider: claude)[/]")
     console.print(
-        "[yellow]No Antigravity CLI session found in ~/.gemini/.[/]\n"
-        "Please run 'agy' or log in to Antigravity CLI first."
+        "[dim]Uses your Claude Pro/Team/Enterprise plan for inference without API keys.[/]"
     )
-    return 1
+    console.print()
+
+    record = claude.read_record()
+    if record and record.get("refresh"):
+        valid = False
+        with contextlib.suppress(Exception):
+            claude.get_valid_token()
+            valid = True
+        if valid:
+            console.print("[green]Successfully linked active Claude session![/]")
+            console.print("  Token refreshed and valid.")
+            console.print()
+            console.print("Run scans with:")
+            console.print('  [cyan]export STRIX_LLM="claude/claude-sonnet-4-6"[/]')
+            console.print('  [cyan]export STRIX_LLM="claude/claude-opus-5-5"[/]')
+            return 0
+
+    verifier, challenge = claude.generate_pkce()
+    state = claude.create_state()
+    authorize_url = claude.build_authorize_url(challenge, state)
+
+    console.print("Open this URL in your browser to authorize:")
+    console.print(f"[cyan]{authorize_url}[/]")
+    console.print()
+    if not manual:
+        with contextlib.suppress(Exception):
+            webbrowser.open(authorize_url)
+
+    console.print()
+    try:
+        pasted = console.input("Paste the authorization code from the browser: ").strip()
+    except EOFError:
+        console.print("[red]No authorization code provided.[/]")
+        return 1
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Sign-in cancelled.[/]")
+        return 130
+
+    if not pasted:
+        console.print("[red]No authorization code provided.[/]")
+        return 1
+
+    return _exchange_and_save_claude_token(console, pasted, verifier, state)
+
+
+def _exchange_and_save_claude_token(
+    console: Console, pasted: str, verifier: str, state: str
+) -> int:
+    code = pasted
+    if "code=" in pasted:
+        parsed = urlparse(pasted)
+        q = parse_qs(parsed.query)
+        code = q.get("code", [pasted])[0]
+
+    try:
+        token_record = claude.exchange_code(code, verifier, state)
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Authentication failed:[/] {exc}")
+        return 1
+
+    claude.save_record(token_record)
+    console.print()
+    console.print("[green]Successfully signed in with Claude![/]")
+    console.print()
+    console.print("Run scans with:")
+    console.print('  [cyan]export STRIX_LLM="claude/claude-sonnet-4-6"[/]')
+    console.print('  [cyan]export STRIX_LLM="claude/claude-opus-5-5"[/]')
+    return 0
 
 
 def _status(console: Console) -> int:
     codex_record = codex.read_record()
     agy_record = antigravity.read_record()
-    if codex_record is None and agy_record is None:
+    claude_record = claude.read_record()
+    if codex_record is None and agy_record is None and claude_record is None:
         console.print(
-            "[yellow]Not signed in.[/] Run [cyan]strix auth login chatgpt[/] or "
-            "[cyan]strix auth login antigravity[/] to sign in."
+            "[yellow]Not signed in.[/] Run [cyan]strix auth login chatgpt[/], "
+            "[cyan]strix auth login antigravity[/], or [cyan]strix auth login claude[/] to sign in."
         )
         return 1
 
@@ -298,14 +430,22 @@ def _status(console: Console) -> int:
         console.print("[green]Signed in[/] with an Antigravity subscription.")
         console.print("  Session: [bold]~/.gemini/ (Active)[/]")
         console.print("  Models: [bold]gemini-3-flash, gemini-2.5-pro, claude-sonnet-4-6[/]")
+    if claude_record:
+        console.print("[green]Signed in[/] with a Claude subscription.")
+        console.print("  Session: [bold]Claude Code (Active)[/]")
+        console.print("  Models: [bold]claude-sonnet-4-6, claude-opus-5-5, claude-haiku-4-5[/]")
 
     current_model = settings.llm.model or ""
-    if codex.subscription_model(current_model) or antigravity.subscription_model(current_model):
+    if (
+        codex.subscription_model(current_model)
+        or antigravity.subscription_model(current_model)
+        or claude.subscription_model(current_model)
+    ):
         console.print(f"  Runs use the subscription (STRIX_LLM=[bold]{current_model}[/]).")
     else:
         console.print(
-            "  [yellow]Note:[/] set [cyan]STRIX_LLM[/] to e.g. [cyan]antigravity/gemini-3-flash[/] "
-            "or [cyan]antigravity/claude-sonnet-4-6[/] to run on subscription."
+            "  [yellow]Note:[/] set [cyan]STRIX_LLM[/] to e.g. [cyan]claude/claude-sonnet-4-6[/] "
+            "or [cyan]antigravity/gemini-3-flash[/] to run on subscription."
         )
     return 0
 
@@ -313,6 +453,7 @@ def _status(console: Console) -> int:
 def _logout(console: Console) -> int:
     codex.logout()
     antigravity.logout()
+    claude.logout()
     console.print("[green]Signed out.[/] Stored subscription credentials removed.")
     return 0
 

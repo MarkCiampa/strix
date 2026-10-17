@@ -16,6 +16,7 @@ import hashlib
 import json
 import logging
 import secrets
+import sys
 import threading
 import time
 import urllib.parse
@@ -108,23 +109,40 @@ def _refresh_guard() -> Iterator[None]:
     """Serialize token refresh within (lock) and across (flock) Strix processes,
     so concurrent runs can't both spend the single-use refresh token."""
     with _refresh_lock:
+        lock_path = AUTH_PATH.with_suffix(".lock")
+        handle = None
         try:
-            import fcntl
-
-            lock_path = AUTH_PATH.with_suffix(".lock")
             lock_path.parent.mkdir(parents=True, exist_ok=True)
-            handle = lock_path.open("w")
-        except (ImportError, OSError):
-            yield
-            return
-        try:
-            with contextlib.suppress(OSError):
+            handle = lock_path.open("a+")
+            if sys.platform == "win32":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        except (ImportError, OSError):
+            pass
+
+        try:
             yield
         finally:
-            with contextlib.suppress(OSError):
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-            handle.close()
+            if handle is not None:
+                try:
+                    if sys.platform == "win32":
+                        import msvcrt
+
+                        handle.seek(0)
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                    else:
+                        import fcntl
+
+                        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                except (ImportError, OSError):
+                    pass
+                with contextlib.suppress(OSError):
+                    handle.close()
 
 
 class CodexAuthError(Exception):
@@ -405,8 +423,8 @@ def subscription_model(model_name: str | None) -> str | None:
 def auth_mode(model_name: str | None) -> str:
     if subscription_model(model_name):
         return "subscription"
-    from strix.config import antigravity
+    from strix.config import antigravity, claude
 
-    if antigravity.subscription_model(model_name):
+    if antigravity.subscription_model(model_name) or claude.subscription_model(model_name):
         return "subscription"
     return "api_key"

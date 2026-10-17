@@ -24,6 +24,8 @@ _STRIPPABLE_PREFIXES = (
     "ollama_chat/",
     "antigravity/",
     "agy/",
+    "claude/",
+    "claude-code/",
 )
 
 _DEFAULT_OUTPUT_TOKENS = 8_192

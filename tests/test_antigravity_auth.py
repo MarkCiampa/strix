@@ -23,7 +23,11 @@ def test_auth_mode() -> None:
     assert antigravity.auth_mode(None) == "api_key"
 
 
-def test_save_read_logout_record() -> None:
+def test_save_read_logout_record(monkeypatch: Any, tmp_path: Any) -> None:
+    fake_auth = tmp_path / "subscription-auth.json"
+    monkeypatch.setattr(antigravity, "AUTH_PATH", fake_auth)
+    monkeypatch.setattr(antigravity, "_candidate_token_paths", list)
+
     record = {
         "type": "oauth",
         "provider": "antigravity",
@@ -103,3 +107,45 @@ def test_transport_converts_messages_and_tools() -> None:
     tools = req["tools"]
     assert len(tools) == 1
     assert tools[0]["functionDeclarations"][0]["name"] == "port_scan"
+
+
+def test_cross_platform_extract_antigravity_token() -> None:
+    # 1. Nested token dict (jetski format)
+    nested = {
+        "token": {
+            "access_token": "ya29.nested",
+            "refresh_token": "1//refresh_nested",
+        }
+    }
+    ext1 = antigravity._extract_antigravity_token(nested)
+    assert ext1 is not None
+    assert ext1["access"] == "ya29.nested"
+    assert ext1["refresh"] == "1//refresh_nested"
+
+    # 2. Flat dict
+    flat = {
+        "access_token": "ya29.flat",
+        "refresh_token": "1//refresh_flat",
+    }
+    ext2 = antigravity._extract_antigravity_token(flat)
+    assert ext2 is not None
+    assert ext2["access"] == "ya29.flat"
+    assert ext2["refresh"] == "1//refresh_flat"
+
+
+def test_cross_platform_candidate_paths(monkeypatch: Any) -> None:
+    monkeypatch.setattr(antigravity.sys, "platform", "win32")
+    monkeypatch.setenv("APPDATA", "C:\\Users\\test\\AppData\\Roaming")
+    paths_win = [str(p) for p in antigravity._candidate_token_paths()]
+    assert any("AppData" in p or "gemini" in p for p in paths_win)
+
+    monkeypatch.setattr(antigravity.sys, "platform", "linux")
+    paths_linux = [str(p) for p in antigravity._candidate_token_paths()]
+    assert any(".config" in p or ".gemini" in p for p in paths_linux)
+
+
+def test_read_env_credentials(monkeypatch: Any) -> None:
+    monkeypatch.setenv("ANTIGRAVITY_TOKEN", "1//test-refresh-token")
+    rec = antigravity.read_record()
+    assert rec is not None
+    assert rec["refresh"] == "1//test-refresh-token"
